@@ -63,12 +63,19 @@ typedef void (*thread_t)(void);
 // the threads statically by placing their function addresses in
 // threadTable[]. A more realistic kernel will allow dynamic creation
 // and termination of threads.
-extern void thread1(void);
-extern void thread2(void);
+extern void UART_thread1(void);
+extern void UART_thread2(void);
+extern void OLED_thread(void);
+extern void LED_thread(void);
+extern void Buzzer_thread(void);
+
 
 static thread_t threadTable[] = {
-  thread1,
-  thread2
+  UART_thread1,
+  UART_thread2,
+  OLED_thread,
+  LED_thread,
+  Buzzer_thread
 };
 #define NUM_THREADS (sizeof(threadTable)/sizeof(threadTable[0]))
 

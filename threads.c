@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include "scheduler.h"
 
-void thread1(void)
+void UART_thread1(void)
 {
   while (1) {
     if (lock_acquire(&threadlock)) {
@@ -18,7 +18,7 @@ void thread1(void)
   }
 }
 
-void thread2(void)
+void UART_thread2(void)
 {
   while (1) {
     if (lock_acquire(&threadlock)) {
@@ -31,4 +31,26 @@ void thread2(void)
     }
     yield();
   }
+}
+
+void OLED_thread(void){
+	while(1){
+		;
+	}
+	yield();
+}
+
+
+void LED_thread(void){
+	while(1){
+		;
+	}
+	yield();
+}
+
+void Buzzer_thread(void){
+	while(1){
+		;
+	}
+	yield();
 }
