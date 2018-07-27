@@ -38,7 +38,9 @@ void UART_Unlock(void){
 	lock_count--;
 }
 
-extern unsigned better_setjump(unsigned *lock) __attribute__((naked));
+
+
+extern unsigned lock_acquire(unsigned *lock) __attribute__((naked));
 unsigned lock_acquire(unsigned *lock)
 {
   asm volatile(
@@ -65,7 +67,7 @@ void lock_release(unsigned *lock)
 typedef struct {
   int active;       // non-zero means thread is allowed to run
   char *stack;      // pointer to TOP of stack (highest memory location)
-  jmp_buf state;    // saved state for longjmp()
+  char state[10];    // saved state for longjmp()
 } threadStruct_t;
 
 // thread_t is a pointer to function with no parameters and
@@ -98,18 +100,67 @@ static jmp_buf scheduler_buf;   // saves the state of the scheduler
 static threadStruct_t threads[NUM_THREADS]; // the thread table
 unsigned currThread;    // The currently active thread
 
+extern int register_save(char *buffer, void *initial_stack) __attribute__((naked));
+int register_save(char *buffer, void *initial_stack)
+{
+	asm volatile (
+				"mov r12, %[initial_stack]" : [initial_stack] "=r" (initial_stack));
+	asm volatile (
+				"stmea r0!, {r4-r11, r12, lr }\n"
+				"mov r0, #0\n"
+				"bx lr");
+}
+
+extern int register_load(char *buffer, void *initial_stack) __attribute__((naked));
+int register_load(char *buffer, void *initial_stack)
+{
+	asm volatile (
+				"ldmea r0!,{r4-r11, r12, lr }\n"
+				"mov r13, r12\n"
+				"mov r0, #0\n"
+				"bx lr");
+}
+
 // This function is called from within user thread context. It executes
 // a jump back to the scheduler. When the scheduler returns here, it acts
 // like a standard function return back to the caller of yield().
 void yield(void)
 {
-  if (setjmp(threads[currThread].state) == 0) {
+  if (register_save(threads[currThread].state,threads[currThread].stack) == 0) {
     // yield() called from the thread, jump to scheduler context
-    longjmp(scheduler_buf, 1);
+    //register_load(scheduler_buf);
+	NVIC_ST_CURRENT_R = 1; //fire interrupt
   } else {
     // longjmp called from scheduler, return to thread context
     return;
   }
+}
+void systick_setup(void){
+	//disable timer
+	NVIC_ST_RELOAD_R = 0;
+	
+	//Configure and enable
+	//bit0 = 1 counter operate in multi-shot manner
+	//bit1 = 1 no exception 
+	//bit2 = 1 core clock
+	NVIC_ST_CTRL_R = 0x7;
+	
+	//reload register (1 ms)
+	NVIC_ST_RELOAD_R = (1000 * 8000);
+}
+void systick_isr(void){
+	//save state of current thread on the array of 10 elements (buf) for that thread
+	register_save(threads[currThread].state, threads[currThread].stack);
+	//Identify the next active thread
+	currThread=(currThread+1)%NUM_THREADS;
+	//restore the state of the next thread from the array of 10 elements 
+	register_load(threads[currThread].state, threads[currThread].stack);
+	//fake a return from the handler to use thread mode and process stack (i.e use the LR register)
+	asm volatile(
+				"movw r0, 0xFFFd\n" 
+				"AND lr, r0\n"
+				"bx lr");
+	
 }
 
 // This is the starting point for all threads. It runs in user thread
@@ -161,7 +212,7 @@ void scheduler(void)
   do {
     // It's kinda inefficient to call setjmp() every time through this
     // loop, huh? I'm sure your code will be better.
-    if (setjmp(scheduler_buf)==0) {
+    if (register_save(scheduler_buf)==0) {
 
       // We saved the state of the scheduler, now find the next
       // runnable thread in round-robin fashion. The 'i' variable
@@ -176,7 +227,7 @@ void scheduler(void)
         }
 
         if (threads[currThread].active) {
-          longjmp(threads[currThread].state, 1);
+          register_load(threads[currThread].state);
         } else {
           i--;
         }
@@ -255,6 +306,12 @@ void main(void)
     // Enable the PWM generator.
     //
     PWMGenEnable(PWM_BASE, PWM_GEN_0);
+	
+	iprintf("Setup Systick and Enable Interrupts\r\n");
+	  //setup systick
+	  //systick_setup();
+	  //Enable all interrupts
+      //IntMasterEnable();
 	
   // Create all the threads and allocate a stack for each one
   for (i=0; i < NUM_THREADS; i++) {
