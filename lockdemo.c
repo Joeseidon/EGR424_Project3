@@ -21,82 +21,6 @@
 //      unsigned lock_acquire(unsigned *threadlockptr); // Shown in class
 //      void lock_release(unsigned *threadlockptr);     // You write this
 
-void handleSVC(int code)
-{
-	int priv = 3;
-  // NOTE: iprintf() is a bad idea inside an exception
-  // handler (exception handlers should be small and short).
-  // But this is the easiest way to show we got it right.
-  switch (code & 0xFF) {
-    case 76:
-	  iprintf("Force a Systick Interrupt\r\n");
-	  NVIC_ST_CURRENT_R = 1;
-	  break;
-	 
-	case 24:
-	  
-	  asm volatile(
-				  "MRS %0,CONTROL\n": "=r" (priv) : 
-				  );
-	  if((priv&0x1) == 1)
-	  {
-		  //Change to privileged
-		  asm volatile(
-			  "MRS R0, CONTROL\n"
-			  "AND R0, R0, #0xFE\n"
-			  "MSR CONTROL, R0\n"
-			  "ISB"
-			  );
-			  
-		  //Confirm Change Occur
-		  asm volatile(
-			  "MRS %0,CONTROL\n": "=r" (priv) : 
-			  );
-		  if((priv&0x1) == 0){
-			  iprintf("Unprivileged. Setting to Privileged\r\n");
-		  }else{
-			  iprintf("No Change\r\n");
-		  }
-	  }
-	  else
-	  {
-		  //Change to unprivileged
-		  asm volatile(
-				  "MRS R0, CONTROL\n"
-				  "ORR R0, R0, #1\n"
-				  "MSR CONTROL, R0\n"
-				  "ISB"
-				  );
-		  //Confirm change occurred
-		  asm volatile(
-			  "MRS %0,CONTROL\n": "=r" (priv) : 
-			  );
-		  if((priv&0x1) == 1){
-			  iprintf("Privileged. Setting to Unprivileged\r\n");
-		  }else{
-			  iprintf("No Change\r\n");
-		  }
-	  }
-	  
-	  break;
-
-    default:
-      iprintf("UNKNOWN SVC CALL\r\n");
-      break;
-  }
-}
-
-void SVCHandler(void){
-	int code;
-	asm volatile(
-				"LDR R1, [R13, #24]\n"
-				"SUB R1, R1, #2\n"
-				"LDRH R3, [R1]\n"
-				"MOV R0, R3" : "=r" (code) :
-				);
-				
-	handleSVC(code);
-}
 unsigned threadlock;
 int lock_count = 0;
 
@@ -176,22 +100,21 @@ static jmp_buf scheduler_buf;   // saves the state of the scheduler
 static threadStruct_t threads[NUM_THREADS]; // the thread table
 unsigned currThread;    // The currently active thread
 
-extern int register_save(int *buffer, void *initial_stack) __attribute__((naked));
-int register_save(int *buffer, void *initial_stack)
+extern int register_save(int *buffer) __attribute__((naked));
+int register_save(int *buffer)
 {
 	asm volatile (
-				"mov r12, %[initial_stack]" : [initial_stack] "=r" (initial_stack));
-	asm volatile (
-				"stmea r0!, {r4-r11, r12, lr }\n"
+				"mov r12, r13\n"
+				"stmia r0!, {r4-r12}\n"
 				"mov r0, #0\n"
 				"bx lr");
 }
 
-extern int register_load(int *buffer, void *initial_stack) __attribute__((naked));
-int register_load(int *buffer, void *initial_stack)
+extern int register_load(int *buffer) __attribute__((naked));
+int register_load(int *buffer)
 {
 	asm volatile (
-				"ldmea r0!,{r4-r11, r12, lr }\n"
+				"ldmia r0!,{r4-r12}\n"
 				"mov r13, r12\n"
 				"mov r0, #0\n"
 				"bx lr");
@@ -202,14 +125,7 @@ int register_load(int *buffer, void *initial_stack)
 // like a standard function return back to the caller of yield().
 void yield(void)
 {
-  if (register_save(threads[currThread].state,threads[currThread].stack) == 0) {
-    // yield() called from the thread, jump to scheduler context
-    //register_load(scheduler_buf);
-	asm volatile ("svc #76"); //fire interrupt
-  } else {
-    // longjmp called from scheduler, return to thread context
-    return;
-  }
+  asm volatile ("svc #76"); //fire interrupt
 }
 void systick_setup(void){
 	//disable timer
@@ -224,17 +140,18 @@ void systick_setup(void){
 	//reload register (1 ms)
 	NVIC_ST_RELOAD_R = (1000 * 8000);
 }
-void systick_isr(void){
+void scheduler(void){	  
 	//save state of current thread on the array of 10 elements (buf) for that thread
-	register_save(threads[currThread].state, threads[currThread].stack);
+	register_save(threads[currThread].state);
 	//Identify the next active thread
 	currThread=(currThread+1)%NUM_THREADS;
 	//restore the state of the next thread from the array of 10 elements 
-	register_load(threads[currThread].state, threads[currThread].stack);
+	register_load(threads[currThread].state);
 	//fake a return from the handler to use thread mode and process stack (i.e use the LR register)
 	asm volatile(
 				"movw r0, 0xFFFd\n" 
-				"AND lr, r0\n"
+				"movt r0, 0xFFFF\n"
+				"ORR lr, r0\n"
 				"bx lr");
 }
 
@@ -277,50 +194,6 @@ void threadStarter(void)
 // threadStarter() for each thread).
 extern void createThread(jmp_buf buf, char *stack);
 
-// This is the "main loop" of the program.
-/*void scheduler(void)
-{
-  unsigned i;
-
-  currThread = -1;
-  
-  do {
-    // It's kinda inefficient to call setjmp() every time through this
-    // loop, huh? I'm sure your code will be better.
-    if (register_save(scheduler_buf)==0) {
-
-      // We saved the state of the scheduler, now find the next
-      // runnable thread in round-robin fashion. The 'i' variable
-      // keeps track of how many runnable threads there are. If we
-      // make a pass through threads[] and all threads are inactive,
-      // then 'i' will become 0 and we can exit the entire program.
-      i = NUM_THREADS;
-      do {
-        // Round-robin scheduler
-        if (++currThread == NUM_THREADS) {
-          currThread = 0;
-        }
-
-        if (threads[currThread].active) {
-          register_load(threads[currThread].state);
-        } else {
-          i--;
-        }
-      } while (i > 0);
-
-      // No active threads left. Leave the scheduler, hence the program.
-      return;
-
-    } else {
-      // yield() returns here. Did the thread that just yielded to us exit? If
-      // so, clean up its entry in the thread table.
-      if (! threads[currThread].active) {
-        free(threads[currThread].stack - STACK_SIZE);
-      }
-    }
-  } while (1);
-}*/
-
 void main(void)
 {
   unsigned i;
@@ -332,7 +205,7 @@ void main(void)
 
   // Initialize the OLED display and write status.
   RIT128x96x4Init(1000000);
-  RIT128x96x4StringDraw("Scheduler Demo",       20,  0, 15);
+  RIT128x96x4StringDraw("Simple \"RTOS\"",       20,  0, 15);
 
   // Enable the peripherals used by this example.
   SysCtlPeripheralEnable(SYSCTL_PERIPH_UART0);

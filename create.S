@@ -24,26 +24,32 @@
     .global createThread
 createThread:  
 
-  /* Save registers in the jump buffer. Their values are
-     not important when the thread is first created. This line is the same as
-     the first two lines of setjmp(), except we don't save SP and LR since we 
-     want to set these to our own values. Really, the only point of this 
-     instruction is to advance R0 to the right location in the jump buffer for 
-     pointing to SP (without having to do any math :-) */
-
-    stmea  r0!, { r4-r10, r11 }
+	/* Get the address to return to */
+	ldr r6, .L0
+	    
+				/*Load data on stack*/
+	/* This will set the value to be loaded into xPSR setting the T bit (bit24) to indicate thumb state*/
 	
-	//need address to return to? and xPSR (APSR, ISPR, EPSR)->complier doesnt like these
-	stmea r1!, {r0-r3,r12,r14}
+	movt r3, 0x80 				/*0x80 sets the 8th bit of the top 16 bits*/
+	MSR PSR, r3
+	
+	
+	stmdb r1!, {r3} 			/*This value will now be loaded for xPSR */
+	
+	
+	stmdb r1!, {r6}				/*Save thread starter as address2returnto*/
+	
+	
+	stmdb r1!, {r0-r3,r12,r14}	/*Save default values*/
+
+	/*Load data into buffer*/
+	stmea r0, {r4-r11, r1}
   
   /* Now we save SP and LR in that order. SP is the R1 parameter, and we have
    * to get the address of threadStarter() into a higher register (so they are
    * placed in the jump buffer in the right order). */
 
-    ldr     R2, .L0
-    stmea   R0!, { R1, R2 }   @ Store "SP" and "LR" for the new thread
-    
-    bx      lr
+    bx lr
     
 .L0:
     .word   threadStarter
