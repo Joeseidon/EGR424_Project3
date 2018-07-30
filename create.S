@@ -25,29 +25,29 @@
 createThread:  
 
 	/* Get the address to return to */
-	ldr r6, .L0
+	mov r6, r2
 	    
 				/*Load data on stack*/
 	/* This will set the value to be loaded into xPSR setting the T bit (bit24) to indicate thumb state*/
 	
-	movt r3, 0x80 				/*0x80 sets the 8th bit of the top 16 bits*/
+	movw r3, 0x0000
+	movt r3, 0x0100				/*0x80 sets the 8th bit of the top 16 bits*/
 	MSR PSR, r3
-	
 	
 	stmdb r1!, {r3} 			/*This value will now be loaded for xPSR */
 	
 	
 	stmdb r1!, {r6}				/*Save thread starter as address2returnto*/
 	
-	
-	stmdb r1!, {r0-r3,r12,r14}	/*Save default values*/
+	/*Save default values*/
+	mov r2, #0
+	mov r3, #0
+	mov r12, #0
+	stmdb r1!, {r0-r3,r12,r14}	
 
 	/*Load data into buffer*/
-	stmea r0, {r4-r11, r1}
-  
-  /* Now we save SP and LR in that order. SP is the R1 parameter, and we have
-   * to get the address of threadStarter() into a higher register (so they are
-   * placed in the jump buffer in the right order). */
+	mov r12, r1	/*move stack pointer into r12 so that it will be at the top of the stack*/
+	stmia r0, {r4-r12}	
 
     bx lr
     

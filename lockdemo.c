@@ -96,15 +96,14 @@ static thread_t threadTable[] = {
 
 // These static global variables are used in scheduler(), in
 // the yield() function, and in threadStarter()
-static jmp_buf scheduler_buf;   // saves the state of the scheduler
 static threadStruct_t threads[NUM_THREADS]; // the thread table
-unsigned currThread;    // The currently active thread
+unsigned currThread = -1;    // The currently active thread
 
 extern int register_save(int *buffer) __attribute__((naked));
 int register_save(int *buffer)
 {
 	asm volatile (
-				"mov r12, r13\n"
+				"MRS r12, PSP\n"
 				"stmia r0!, {r4-r12}\n"
 				"mov r0, #0\n"
 				"bx lr");
@@ -115,8 +114,10 @@ int register_load(int *buffer)
 {
 	asm volatile (
 				"ldmia r0!,{r4-r12}\n"
-				"mov r13, r12\n"
-				"mov r0, #0\n"
+				"MSR PSP, r12\n"
+				//"mov r0, #0\n"
+				"movw lr, 0xFFFd\n" 
+				"movt lr, 0xFFFF\n"
 				"bx lr");
 }
 
@@ -144,15 +145,15 @@ void scheduler(void){
 	//save state of current thread on the array of 10 elements (buf) for that thread
 	register_save(threads[currThread].state);
 	//Identify the next active thread
-	currThread=(currThread+1)%NUM_THREADS;
+	currThread=(++currThread)%NUM_THREADS;
 	//restore the state of the next thread from the array of 10 elements 
 	register_load(threads[currThread].state);
 	//fake a return from the handler to use thread mode and process stack (i.e use the LR register)
-	asm volatile(
-				"movw r0, 0xFFFd\n" 
-				"movt r0, 0xFFFF\n"
-				"ORR lr, r0\n"
-				"bx lr");
+	//asm volatile(
+				//"movw lr, 0xFFFd\n" 
+				//"movt lr, 0xFFFF\n"
+				//"ORR lr, r0\n"
+				//"bx lr");
 }
 
 // This is the starting point for all threads. It runs in user thread
@@ -162,22 +163,10 @@ void scheduler(void){
 // start here.
 void threadStarter(void)
 {
-	
-	int j;
-	//Fill stack with sentinel values
-	for(j = 0; j < STACK_SIZE; j++){
-		*(threads[currThread].stack - j)=0xFF;
-	}
   // Call the entry point for this thread. The next line returns
   // only when the thread exits.
   (*(threadTable[currThread]))();
   
-		for(j=STACK_SIZE-1; j>=0; j--){
-			if(*(threads[currThread].stack-j)!=0xFF)
-				break;
-		}
-		iprintf("Free Space (bytes)= %d\r\n",(STACK_SIZE-j));
-
   // Do thread-specific cleanup tasks. Currently, this just means marking
   // the thread as inactive. Do NOT free the stack here because we're
   // still using it! Remember, this function runs in user thread context.
@@ -192,9 +181,9 @@ void threadStarter(void)
 // initial jump-buffer (as would setjmp()) but with our own values
 // for the stack (passed to createThread()) and LR (always set to
 // threadStarter() for each thread).
-extern void createThread(jmp_buf buf, char *stack);
+extern void createThread(jmp_buf buf, char *stack, thread_t ptr);
 
-void main(void)
+int main(void)
 {
   unsigned i;
   unsigned long ulPeriod;
@@ -205,7 +194,7 @@ void main(void)
 
   // Initialize the OLED display and write status.
   RIT128x96x4Init(1000000);
-  RIT128x96x4StringDraw("Simple \"RTOS\"",       20,  0, 15);
+  RIT128x96x4StringDraw("Simple \"RTOS\"", 20,  0, 15);
 
   // Enable the peripherals used by this example.
   SysCtlPeripheralEnable(SYSCTL_PERIPH_UART0);
@@ -268,11 +257,11 @@ void main(void)
       iprintf("Out of memory\r\n");
       exit(1);
     }
-
+	iprintf("Thread %d Created\r\n",i);
     // After createThread() executes, we can execute a longjmp()
     // to threads[i].state and the thread will begin execution
     // at threadStarter() with its own stack.
-    createThread(threads[i].state, threads[i].stack);
+    createThread(threads[i].state, threads[i].stack, threadTable[i]);
   }
 
   // Initialize the global thread lock
@@ -283,7 +272,6 @@ void main(void)
 	  systick_setup();
 	  //Enable all interrupts
       IntMasterEnable();
-	  
   // Start running coroutines
   //scheduler();
 	asm volatile ("svc #76");
@@ -294,7 +282,7 @@ void main(void)
   // from main() hence exit() should be called implicitly (according to
   // ANSI C). However, TI's startup_gcc.c code (ResetISR) does not
   // call exit() so we do it manually.
-  exit(0);
+  return 0;
 }
 
 /*
