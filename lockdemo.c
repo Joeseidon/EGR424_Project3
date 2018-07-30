@@ -20,6 +20,83 @@
 //      void lock_init(unsigned *threadlockptr);        // You write this
 //      unsigned lock_acquire(unsigned *threadlockptr); // Shown in class
 //      void lock_release(unsigned *threadlockptr);     // You write this
+
+void handleSVC(int code)
+{
+	int priv = 3;
+  // NOTE: iprintf() is a bad idea inside an exception
+  // handler (exception handlers should be small and short).
+  // But this is the easiest way to show we got it right.
+  switch (code & 0xFF) {
+    case 76:
+	  iprintf("Force a Systick Interrupt\r\n");
+	  NVIC_ST_CURRENT_R = 1;
+	  break;
+	 
+	case 24:
+	  
+	  asm volatile(
+				  "MRS %0,CONTROL\n": "=r" (priv) : 
+				  );
+	  if((priv&0x1) == 1)
+	  {
+		  //Change to privileged
+		  asm volatile(
+			  "MRS R0, CONTROL\n"
+			  "AND R0, R0, #0xFE\n"
+			  "MSR CONTROL, R0\n"
+			  "ISB"
+			  );
+			  
+		  //Confirm Change Occur
+		  asm volatile(
+			  "MRS %0,CONTROL\n": "=r" (priv) : 
+			  );
+		  if((priv&0x1) == 0){
+			  iprintf("Unprivileged. Setting to Privileged\r\n");
+		  }else{
+			  iprintf("No Change\r\n");
+		  }
+	  }
+	  else
+	  {
+		  //Change to unprivileged
+		  asm volatile(
+				  "MRS R0, CONTROL\n"
+				  "ORR R0, R0, #1\n"
+				  "MSR CONTROL, R0\n"
+				  "ISB"
+				  );
+		  //Confirm change occurred
+		  asm volatile(
+			  "MRS %0,CONTROL\n": "=r" (priv) : 
+			  );
+		  if((priv&0x1) == 1){
+			  iprintf("Privileged. Setting to Unprivileged\r\n");
+		  }else{
+			  iprintf("No Change\r\n");
+		  }
+	  }
+	  
+	  break;
+
+    default:
+      iprintf("UNKNOWN SVC CALL\r\n");
+      break;
+  }
+}
+
+void SVCHandler(void){
+	int code;
+	asm volatile(
+				"LDR R1, [R13, #24]\n"
+				"SUB R1, R1, #2\n"
+				"LDRH R3, [R1]\n"
+				"MOV R0, R3" : "=r" (code) :
+				);
+				
+	handleSVC(code);
+}
 unsigned threadlock;
 int lock_count = 0;
 
@@ -67,7 +144,7 @@ void lock_release(unsigned *lock)
 typedef struct {
   int active;       // non-zero means thread is allowed to run
   char *stack;      // pointer to TOP of stack (highest memory location)
-  char state[10];    // saved state for longjmp()
+  int state[10];    // saved state for longjmp()
 } threadStruct_t;
 
 // thread_t is a pointer to function with no parameters and
@@ -84,13 +161,12 @@ extern void OLED_thread(void);
 extern void LED_thread(void);
 extern void Buzzer_thread(void);
 
-
+/* BUZZER REMOVED */
 static thread_t threadTable[] = {
   UART_thread1,
   UART_thread2,
   OLED_thread,
-  LED_thread,
-  Buzzer_thread
+  LED_thread
 };
 #define NUM_THREADS (sizeof(threadTable)/sizeof(threadTable[0]))
 
@@ -100,8 +176,8 @@ static jmp_buf scheduler_buf;   // saves the state of the scheduler
 static threadStruct_t threads[NUM_THREADS]; // the thread table
 unsigned currThread;    // The currently active thread
 
-extern int register_save(char *buffer, void *initial_stack) __attribute__((naked));
-int register_save(char *buffer, void *initial_stack)
+extern int register_save(int *buffer, void *initial_stack) __attribute__((naked));
+int register_save(int *buffer, void *initial_stack)
 {
 	asm volatile (
 				"mov r12, %[initial_stack]" : [initial_stack] "=r" (initial_stack));
@@ -111,8 +187,8 @@ int register_save(char *buffer, void *initial_stack)
 				"bx lr");
 }
 
-extern int register_load(char *buffer, void *initial_stack) __attribute__((naked));
-int register_load(char *buffer, void *initial_stack)
+extern int register_load(int *buffer, void *initial_stack) __attribute__((naked));
+int register_load(int *buffer, void *initial_stack)
 {
 	asm volatile (
 				"ldmea r0!,{r4-r11, r12, lr }\n"
@@ -129,7 +205,7 @@ void yield(void)
   if (register_save(threads[currThread].state,threads[currThread].stack) == 0) {
     // yield() called from the thread, jump to scheduler context
     //register_load(scheduler_buf);
-	NVIC_ST_CURRENT_R = 1; //fire interrupt
+	asm volatile ("svc #76"); //fire interrupt
   } else {
     // longjmp called from scheduler, return to thread context
     return;
@@ -160,7 +236,6 @@ void systick_isr(void){
 				"movw r0, 0xFFFd\n" 
 				"AND lr, r0\n"
 				"bx lr");
-	
 }
 
 // This is the starting point for all threads. It runs in user thread
@@ -203,7 +278,7 @@ void threadStarter(void)
 extern void createThread(jmp_buf buf, char *stack);
 
 // This is the "main loop" of the program.
-void scheduler(void)
+/*void scheduler(void)
 {
   unsigned i;
 
@@ -244,7 +319,7 @@ void scheduler(void)
       }
     }
   } while (1);
-}
+}*/
 
 void main(void)
 {
@@ -307,11 +382,7 @@ void main(void)
     //
     PWMGenEnable(PWM_BASE, PWM_GEN_0);
 	
-	iprintf("Setup Systick and Enable Interrupts\r\n");
-	  //setup systick
-	  //systick_setup();
-	  //Enable all interrupts
-      //IntMasterEnable();
+	
 	
   // Create all the threads and allocate a stack for each one
   for (i=0; i < NUM_THREADS; i++) {
@@ -334,9 +405,18 @@ void main(void)
   // Initialize the global thread lock
   lock_init(&threadlock);
 
+  iprintf("Setup Systick and Enable Interrupts\r\n");
+	  //setup systick
+	  systick_setup();
+	  //Enable all interrupts
+      IntMasterEnable();
+	  
   // Start running coroutines
-  scheduler();
-
+  //scheduler();
+	asm volatile ("svc #76");
+	while(1){
+		;
+	}
   // If scheduler() returns, all coroutines are inactive and we return
   // from main() hence exit() should be called implicitly (according to
   // ANSI C). However, TI's startup_gcc.c code (ResetISR) does not

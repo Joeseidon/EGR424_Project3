@@ -32,6 +32,9 @@ createThread:
      pointing to SP (without having to do any math :-) */
 
     stmea  r0!, { r4-r10, r11 }
+	
+	//need address to return to? and xPSR (APSR, ISPR, EPSR)->complier doesnt like these
+	stmea r1!, {r0-r3,r12,r14}
   
   /* Now we save SP and LR in that order. SP is the R1 parameter, and we have
    * to get the address of threadStarter() into a higher register (so they are
