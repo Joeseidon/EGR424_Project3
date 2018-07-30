@@ -25,13 +25,13 @@
 createThread:  
 
 	/* Get the address to return to */
-	mov r6, r2
+	ldr r6, .L0
 	    
 				/*Load data on stack*/
 	/* This will set the value to be loaded into xPSR setting the T bit (bit24) to indicate thumb state*/
 	
 	movw r3, 0x0000
-	movt r3, 0x0100				/*0x80 sets the 8th bit of the top 16 bits*/
+	movt r3, 0x0100				/*0x100 sets the 9th bit of the top 16 bits*/
 	MSR PSR, r3
 	
 	stmdb r1!, {r3} 			/*This value will now be loaded for xPSR */

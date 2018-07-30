@@ -171,7 +171,7 @@ void threadStarter(void)
   // the thread as inactive. Do NOT free the stack here because we're
   // still using it! Remember, this function runs in user thread context.
   threads[currThread].active = 0;
-
+  
   // This yield returns to the scheduler and never returns back since
   // the scheduler identifies the thread as inactive.
   yield();
@@ -181,7 +181,7 @@ void threadStarter(void)
 // initial jump-buffer (as would setjmp()) but with our own values
 // for the stack (passed to createThread()) and LR (always set to
 // threadStarter() for each thread).
-extern void createThread(jmp_buf buf, char *stack, thread_t ptr);
+extern void createThread(jmp_buf buf, char *stack);
 
 int main(void)
 {
@@ -261,7 +261,7 @@ int main(void)
     // After createThread() executes, we can execute a longjmp()
     // to threads[i].state and the thread will begin execution
     // at threadStarter() with its own stack.
-    createThread(threads[i].state, threads[i].stack, threadTable[i]);
+    createThread(threads[i].state, threads[i].stack);
   }
 
   // Initialize the global thread lock
