@@ -12,6 +12,8 @@
 #include "scheduler.h"
 #include "driverlib/interrupt.h"
 #include "inc/lm3s6965.h"
+#include "inc/hw_ints.h"
+#include "inc/hw_nvic.h"
 
 #define STACK_SIZE 1604   // Amount of stack space for each thread
 
@@ -23,6 +25,7 @@
 
 unsigned threadlock;
 int lock_count = 0;
+int oled_done = 0;
 
 // These are functions you have to write. Right now they are do-nothing stubs.
 void lock_init(unsigned *lock)
@@ -141,13 +144,23 @@ void systick_setup(void){
 	//reload register (1 ms)
 	NVIC_ST_RELOAD_R = (1000 * 8000);
 }
-void scheduler(void){	  
-	//save state of current thread on the array of 10 elements (buf) for that thread
-	register_save(threads[currThread].state);
+void scheduler(void){
+	oled_done++;
+	if(oled_done >= 30 && currThread == 2 && threads[currThread].active){
+		threads[currThread].active = 0;
+		free(threads[currThread].stack - STACK_SIZE);
+		//free(threads[currThread].state);
+	}
+	if(threads[currThread].active){
+		//save state of current thread on the array of 10 elements (buf) for that thread
+		register_save(threads[currThread].state);
+	}
 	//Identify the next active thread
 	currThread=(++currThread)%NUM_THREADS;
-	//restore the state of the next thread from the array of 10 elements 
-	register_load(threads[currThread].state);
+	if(threads[currThread].active){
+		//restore the state of the next thread from the array of 10 elements 
+		register_load(threads[currThread].state);
+	}
 	//fake a return from the handler to use thread mode and process stack (i.e use the LR register)
 	//asm volatile(
 				//"movw lr, 0xFFFd\n" 
@@ -191,10 +204,6 @@ int main(void)
   // Set the clocking to run directly from the crystal.
   SysCtlClockSet(SYSCTL_SYSDIV_1 | SYSCTL_USE_OSC | SYSCTL_OSC_MAIN |
                  SYSCTL_XTAL_8MHZ);
-
-  // Initialize the OLED display and write status.
-  RIT128x96x4Init(1000000);
-  RIT128x96x4StringDraw("Simple \"RTOS\"", 20,  0, 15);
 
   // Enable the peripherals used by this example.
   SysCtlPeripheralEnable(SYSCTL_PERIPH_UART0);
@@ -244,7 +253,9 @@ int main(void)
     //
     PWMGenEnable(PWM_BASE, PWM_GEN_0);
 	
-	
+	// Initialize the OLED display and write status.
+	RIT128x96x4Init(1000000);
+	RIT128x96x4StringDraw("Simple \"RTOS\"", 20,  0, 15);
 	
   // Create all the threads and allocate a stack for each one
   for (i=0; i < NUM_THREADS; i++) {

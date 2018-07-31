@@ -43,58 +43,32 @@ void UART_thread2(void)
 }
 
 void OLED_thread(void){
-	static int count = 0;
-	static int onOff = 1;
+	volatile unsigned long count = 0;
 	while(1){
-		count++;
-		if(count == 150){
-			RIT128x96x4Init(1000000);
-			if(onOff){
-				RIT128x96x4Clear();
-				onOff = 0;
-			}else{
-				RIT128x96x4StringDraw("Hello World!", 30, 24, 15);
-				onOff = 1;
-			}
-			count = 0;
-		}else{
-			yield();
-		}
+		for(count = 0; count < 200000; count++);
+		RIT128x96x4StringDraw("            ", 30, 24, 15);
+		for(count = 0; count < 200000; count++);
+		RIT128x96x4StringDraw("Hello World!", 30, 24, 15);
 	}
-	yield();
 }
 
 
 void LED_thread(void){
-	static int count = 0;
+	volatile unsigned long count = 0;
 	while(1){
-		count++;
-		if(count==50){
-			GPIO_PORTF_DATA_R ^= 0x01;
-			count = 0;
-		}else{
-			yield();
-		}
+		for(count = 0; count < 200000; count++);
+		GPIO_PORTF_DATA_R ^= 0x01;
 	}
-	yield();
 }
 
 void Buzzer_thread(void){
-	static int count = 0;
+	volatile unsigned long count = 0;
 	static int onOff = 1;
 	while(1){
-		count++;
-		if(count==50){
-			if(onOff){
-				PWMOutputState(PWM_BASE,PWM_OUT_1_BIT, false);
-			}else{
-				PWMOutputState(PWM_BASE,PWM_OUT_1_BIT, true);
-			}
-			onOff= (onOff==0)? 1:0;
-			count=0;
-		}else{
-			yield();
-		}
+		for(count = 0; count < 100000; count++);
+		PWMOutputState(PWM_BASE,PWM_OUT_1_BIT, true);
+		for(count = 0; count < 100000; count++);
+		PWMOutputState(PWM_BASE,PWM_OUT_1_BIT, false);
+		yield();
 	}
-	yield();
 }
