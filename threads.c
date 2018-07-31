@@ -22,7 +22,7 @@ void UART_thread1(void)
 		UART_Lock();
 		iprintf("Thread 1 printing\r\n");
 		UART_Unlock();
-
+		
       lock_release(&threadlock);
     }
     yield();
@@ -45,6 +45,7 @@ void UART_thread2(void)
 void OLED_thread(void){
 	static int count = 0;
 	static int onOff = 1;
+	static int use_count = 0;
 	while(1){
 		count++;
 		if(count == 150){
@@ -57,6 +58,9 @@ void OLED_thread(void){
 				onOff = 1;
 			}
 			count = 0;
+			if((use_count++)>=8){
+				OLED_thread_off = 1;
+			}
 		}else{
 			yield();
 		}
@@ -82,6 +86,7 @@ void LED_thread(void){
 void Buzzer_thread(void){
 	static int count = 0;
 	static int onOff = 1;
+	static int use_count = 0;
 	while(1){
 		count++;
 		if(count==50){
@@ -92,6 +97,9 @@ void Buzzer_thread(void){
 			}
 			onOff= (onOff==0)? 1:0;
 			count=0;
+			if((use_count++)>=8){
+				Buzzer_thread_off = 1;
+			}
 		}else{
 			yield();
 		}

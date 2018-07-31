@@ -67,6 +67,7 @@ void lock_release(unsigned *lock)
 }
 typedef struct {
   int active;       // non-zero means thread is allowed to run
+  int terminated;	// indicates when a inactive threads memory has been freed
   char *stack;      // pointer to TOP of stack (highest memory location)
   int state[10];    // saved state for longjmp()
 } threadStruct_t;
@@ -90,7 +91,8 @@ static thread_t threadTable[] = {
   UART_thread1,
   UART_thread2,
   OLED_thread,
-  LED_thread
+  LED_thread,
+  Buzzer_thread
 };
 #define NUM_THREADS (sizeof(threadTable)/sizeof(threadTable[0]))
 
@@ -141,13 +143,28 @@ void systick_setup(void){
 	//reload register (1 ms)
 	NVIC_ST_RELOAD_R = (1000 * 8000);
 }
+int OLED_thread_off = 0, Buzzer_thread_off=0;
 void scheduler(void){	  
 	//save state of current thread on the array of 10 elements (buf) for that thread
 	register_save(threads[currThread].state);
 	//Identify the next active thread
 	currThread=(++currThread)%NUM_THREADS;
+	
+
+	if(threads[currThread].terminated == 0 && currThread==4 && Buzzer_thread_off==1){
+		free(threads[currThread].stack - STACK_SIZE);
+		threads[currThread].terminated = 1;
+		threads[currThread].active=0;
+	}
+	if(threads[currThread].terminated == 0 && currThread==2 && OLED_thread_off==1){
+		free(threads[currThread].stack - STACK_SIZE);
+		threads[currThread].terminated = 1;
+		threads[currThread].active=0;
+	}
 	//restore the state of the next thread from the array of 10 elements 
-	register_load(threads[currThread].state);
+	if(threads[currThread].active==1){
+		register_load(threads[currThread].state);
+	}
 	//fake a return from the handler to use thread mode and process stack (i.e use the LR register)
 	//asm volatile(
 				//"movw lr, 0xFFFd\n" 
@@ -250,7 +267,7 @@ int main(void)
   for (i=0; i < NUM_THREADS; i++) {
     // Mark thread as runnable
     threads[i].active = 1;
-
+	threads[i].terminated = 0;
     // Allocate stack
     threads[i].stack = (char *)malloc(STACK_SIZE) + STACK_SIZE;
     if (threads[i].stack == 0) {

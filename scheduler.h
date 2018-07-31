@@ -8,6 +8,8 @@ extern void lock_release(unsigned *lock);
 extern void UART_Lock(void);
 extern void UART_Unlock(void);
 
+extern int OLED_thread_off;
+extern int Buzzer_thread_off;
 extern unsigned currThread;
 extern void yield(void);
 
