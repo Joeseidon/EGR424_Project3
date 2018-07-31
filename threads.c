@@ -14,7 +14,9 @@
 #include "inc/lm3s6965.h"
 
 
-
+// This method attempt to grad a lock for the uart terminal.
+// If successful, the function prints a message then relases
+// the lock.
 void UART_thread1(void)
 {
   while (1) {
@@ -29,6 +31,9 @@ void UART_thread1(void)
   }
 }
 
+// This method attempt to grad a lock for the uart terminal.
+// If successful, the function prints a message then relases
+// the lock.
 void UART_thread2(void)
 {
   while (1) {
@@ -42,6 +47,8 @@ void UART_thread2(void)
   }
 }
 
+// This method prints and clears a message on the OLED as 
+// many times as it can before the scheduler takes control
 void OLED_thread(void){
 	volatile unsigned long count = 0;
 	while(1){
@@ -52,7 +59,8 @@ void OLED_thread(void){
 	}
 }
 
-
+// This method blinks an LED as many times as it can before
+// its prempted by the scheduler.
 void LED_thread(void){
 	volatile unsigned long count = 0;
 	while(1){
@@ -61,9 +69,9 @@ void LED_thread(void){
 	}
 }
 
+// This method beeps the onboard buzzer
 void Buzzer_thread(void){
 	volatile unsigned long count = 0;
-	static int onOff = 1;
 	while(1){
 		for(count = 0; count < 100000; count++);
 		PWMOutputState(PWM_BASE,PWM_OUT_1_BIT, true);

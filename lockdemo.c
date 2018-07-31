@@ -1,6 +1,9 @@
+/* Standard Includes */
 #include <stdio.h>
 #include <setjmp.h>
 #include <stdlib.h>
+
+/* Board Specific Includes */
 #include "driverlib/debug.h"
 #include "inc/hw_memmap.h"
 #include "inc/hw_types.h"
@@ -9,13 +12,16 @@
 #include "driverlib/sysctl.h"
 #include "driverlib/uart.h"
 #include "rit128x96x4.h"
-#include "scheduler.h"
 #include "driverlib/interrupt.h"
 #include "inc/lm3s6965.h"
 #include "inc/hw_ints.h"
 #include "inc/hw_nvic.h"
 
-#define STACK_SIZE 1604   // Amount of stack space for each thread
+/* Local Includes */
+#include "scheduler.h"
+
+// Amount of stack space for each thread
+#define STACK_SIZE 1604   
 
 // This is the lock variable used by all threads. Interface functions
 // for it are:
@@ -25,25 +31,28 @@
 
 unsigned threadlock;
 int lock_count = 0;
+
+//Value used to terminate a thread to show system effects
 int oled_done = 0;
 
-// These are functions you have to write. Right now they are do-nothing stubs.
+// Initializes a lock
 void lock_init(unsigned *lock)
 {
 	//set to default unused state
   *lock=1;
 }
 
+// Counting lock incrementation
 void UART_Lock(void){
 	lock_count++;
 }
 
+// Counting lock decrement
 void UART_Unlock(void){
 	lock_count--;
 }
 
-
-
+// Acquires a lock used to protect a critical section
 extern unsigned lock_acquire(unsigned *lock) __attribute__((naked));
 unsigned lock_acquire(unsigned *lock)
 {
@@ -63,11 +72,14 @@ unsigned lock_acquire(unsigned *lock)
 				"BX LR\n");
 }
 
+// Releases a semaphore lock if the counting lock has been decremented
 void lock_release(unsigned *lock)
 {
 	if(lock_count==0)
 		*lock=1;
 }
+
+// Structure used to hold thread information
 typedef struct {
   int active;       // non-zero means thread is allowed to run
   char *stack;      // pointer to TOP of stack (highest memory location)
@@ -88,20 +100,23 @@ extern void OLED_thread(void);
 extern void LED_thread(void);
 extern void Buzzer_thread(void);
 
-/* BUZZER REMOVED */
+// Thread table holds all threads that are going to run
 static thread_t threadTable[] = {
   UART_thread1,
   UART_thread2,
   OLED_thread,
-  LED_thread
+  LED_thread,
+  Buzzer_thread
 };
 #define NUM_THREADS (sizeof(threadTable)/sizeof(threadTable[0]))
 
-// These static global variables are used in scheduler(), in
-// the yield() function, and in threadStarter()
+// Used by scheduler and during creation to access stack, state, and active 
+// information.
 static threadStruct_t threads[NUM_THREADS]; // the thread table
 unsigned currThread = -1;    // The currently active thread
 
+
+// Moves process stack pointer and registers r4 - r11 onto a threads buffer
 extern int register_save(int *buffer) __attribute__((naked));
 int register_save(int *buffer)
 {
@@ -112,25 +127,28 @@ int register_save(int *buffer)
 				"bx lr");
 }
 
+// Loads data (r4- r11) and process stack pointer for a thread
+// This function also fakes a return switching to the process stack
+// and thread mode from main stack and handler mode.
 extern int register_load(int *buffer) __attribute__((naked));
 int register_load(int *buffer)
 {
 	asm volatile (
 				"ldmia r0!,{r4-r12}\n"
 				"MSR PSP, r12\n"
-				//"mov r0, #0\n"
 				"movw lr, 0xFFFd\n" 
 				"movt lr, 0xFFFF\n"
 				"bx lr");
 }
 
-// This function is called from within user thread context. It executes
-// a jump back to the scheduler. When the scheduler returns here, it acts
-// like a standard function return back to the caller of yield().
+// This function is called from threads to yield the processor to the 
+// scheduler
 void yield(void)
 {
   asm volatile ("svc #76"); //fire interrupt
 }
+
+// This function initializes the systick timer
 void systick_setup(void){
 	//disable timer
 	NVIC_ST_RELOAD_R = 0;
@@ -144,6 +162,8 @@ void systick_setup(void){
 	//reload register (1 ms)
 	NVIC_ST_RELOAD_R = (1000 * 8000);
 }
+
+// This is where all of the action happens. Threads are cycled and activated or killed
 void scheduler(void){
 	oled_done++;
 	if(oled_done >= 30 && currThread == 2 && threads[currThread].active){
@@ -161,18 +181,12 @@ void scheduler(void){
 		//restore the state of the next thread from the array of 10 elements 
 		register_load(threads[currThread].state);
 	}
-	//fake a return from the handler to use thread mode and process stack (i.e use the LR register)
-	//asm volatile(
-				//"movw lr, 0xFFFd\n" 
-				//"movt lr, 0xFFFF\n"
-				//"ORR lr, r0\n"
-				//"bx lr");
 }
 
 // This is the starting point for all threads. It runs in user thread
 // context using the thread-specific stack. The address of this function
-// is saved by createThread() in the LR field of the jump buffer so that
-// the first time the scheduler() does a longjmp() to the thread, we
+// is saved by createThread() in the LR field of the state buffer so that
+// the first time the scheduler() does a register load to the thread, we
 // start here.
 void threadStarter(void)
 {
@@ -191,7 +205,7 @@ void threadStarter(void)
 }
 
 // This function is implemented in assembly language. It sets up the
-// initial jump-buffer (as would setjmp()) but with our own values
+// initial state buffer (as would setjmp()) but with our own values
 // for the stack (passed to createThread()) and LR (always set to
 // threadStarter() for each thread).
 extern void createThread(jmp_buf buf, char *stack);
@@ -227,9 +241,9 @@ int main(void)
 	GPIO_PORTF_DIR_R = 0x01;
 	GPIO_PORTF_DEN_R = 0x01;
 	
+	// Sets up PWM output
 	SysCtlPeripheralEnable(SYSCTL_PERIPH_PWM);
     SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOD);
-
 	GPIOPinTypePWM(GPIO_PORTD_BASE, GPIO_PIN_1);
 	
 	//
@@ -237,6 +251,7 @@ int main(void)
     //
     ulPeriod = SysCtlClockGet() / 220;
 	
+	// Initialize PWM with Period
 	PWMGenConfigure(PWM_BASE, PWM_GEN_0,
                     PWM_GEN_MODE_UP_DOWN | PWM_GEN_MODE_NO_SYNC);
     PWMGenPeriodSet(PWM_BASE, PWM_GEN_0, ulPeriod);
@@ -279,12 +294,12 @@ int main(void)
   lock_init(&threadlock);
 
   iprintf("Setup Systick and Enable Interrupts\r\n");
-	  //setup systick
-	  systick_setup();
-	  //Enable all interrupts
-      IntMasterEnable();
-  // Start running coroutines
-  //scheduler();
+  //setup systick
+  systick_setup();
+  //Enable all interrupts
+  IntMasterEnable();
+  
+  //jump to scheduler();
 	asm volatile ("svc #76");
 	while(1){
 		;
